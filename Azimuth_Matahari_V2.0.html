@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NOAA / USNO Simplified SPA – SunShot</title>
+
+<style>
+body {
+    font-family: Arial, sans-serif;
+    max-width: 900px;
+    margin: auto;
+    background: #f4f6f8;
+    padding: 20px;
+}
+h1, h2 { color: #003366; }
+fieldset {
+    background: #fff;
+    border: 1px solid #ccc;
+    padding: 15px;
+    margin-top: 15px;
+}
+label { margin-top: 10px; display: block; }
+input, select {
+    width: 100%;
+    padding: 8px;
+    font-size: 16px;
+}
+.row {
+    display: flex;
+    gap: 10px;
+}
+.row > * { flex: 1; }
+button {
+    margin-top: 20px;
+    padding: 12px;
+    font-size: 16px;
+}
+.result {
+    margin-top: 20px;
+    background: #ffffff;
+    padding: 15px;
+    border: 1px solid #ccc;
+}
+footer {
+    margin-top: 30px;
+    font-size: 12px;
+    text-align: center;
+    color: #555;
+}
+</style>
+</head>
+
+<body>
+
+<h1>NOAA / USNO Simplified Solar Position Algorithm</h1>
+<h2>Marine Survey – SunShot / Gyro Check</h2>
+
+<fieldset>
+<legend><b>Observer Position</b></legend>
+
+<label>Latitude (DD MM SS)</label>
+<div class="row">
+    <input id="latInput" placeholder="24 28 30">
+    <select id="latHem"><option>N</option><option>S</option></select>
+</div>
+
+<label>Longitude (DDD MM SS)</label>
+<div class="row">
+    <input id="lonInput" placeholder="054 22 28">
+    <select id="lonHem"><option>E</option><option>W</option></select>
+</div>
+</fieldset>
+
+<fieldset>
+<legend><b>Date & Time (UTC)</b></legend>
+<label>Date</label>
+<input id="date" type="date">
+<label>Time</label>
+<input id="time" type="time" step="1">
+</fieldset>
+
+<fieldset>
+<legend><b>Sun Observation</b></legend>
+<label>Observed Angle (ddd mm ss)</label>
+<input id="obsAngleInput" placeholder="253 29 47">
+</fieldset>
+
+<button onclick="calculate()">Calculate</button>
+
+<div class="result" id="output"></div>
+
+<footer>
+Sendy Bram<br>
+Mag Maintainer – 2025<br>
+NOAA / USNO Simplified SPA – SunShot Logic
+</footer>
+
+<script>
+function deg2rad(d){ return d * Math.PI / 180; }
+function rad2deg(r){ return r * 180 / Math.PI; }
+
+function parseDMS(input) {
+    const p = input.trim().split(/\s+/);
+    if (p.length !== 3) throw "Use format: DD MM SS";
+    return parseFloat(p[0]) + parseFloat(p[1])/60 + parseFloat(p[2])/3600;
+}
+
+function calculate() {
+try {
+    const latStr = document.getElementById("latInput").value;
+    const lonStr = document.getElementById("lonInput").value;
+    const obsStr = document.getElementById("obsAngleInput").value;
+
+    let lat = parseDMS(latStr);
+    let lon = parseDMS(lonStr);
+    let obsAngle = parseDMS(obsStr);
+
+    if (document.getElementById("latHem").value === "S") lat *= -1;
+    if (document.getElementById("lonHem").value === "W") lon *= -1;
+
+    const dateVal = document.getElementById("date").value;
+    const timeVal = document.getElementById("time").value;
+    if (!dateVal || !timeVal) throw "Date & time required";
+
+    const dt = new Date(dateVal + "T" + timeVal + "Z");
+
+    // Julian Day
+    const jd = dt.getTime()/86400000 + 2440587.5;
+    const T = (jd - 2451545.0)/36525.0;
+
+    // NOAA solar position
+    const L0 = (280.46646 + T*(36000.76983 + 0.0003032*T)) % 360;
+    const M = 357.52911 + T*(35999.05029 - 0.0001537*T);
+    const e = 0.016708634 - T*(0.000042037 + 0.0000001267*T);
+
+    const C =
+        (1.914602 - T*(0.004817 + 0.000014*T))*Math.sin(deg2rad(M)) +
+        (0.019993 - 0.000101*T)*Math.sin(deg2rad(2*M)) +
+        0.000289*Math.sin(deg2rad(3*M));
+
+    const omega = 125.04 - 1934.136*T;
+    const lambda = L0 + C - 0.00569 - 0.00478*Math.sin(deg2rad(omega));
+
+    const eps0 = 23 + (26 + ((21.448 -
+        T*(46.815 + T*(0.00059 - T*0.001813))) / 60)) / 60;
+    const eps = eps0 + 0.00256*Math.cos(deg2rad(omega));
+
+    const decl = rad2deg(Math.asin(
+        Math.sin(deg2rad(eps))*Math.sin(deg2rad(lambda))
+    ));
+
+    const y = Math.tan(deg2rad(eps/2))**2;
+    const eqTime = 4*rad2deg(
+        y*Math.sin(2*deg2rad(L0)) -
+        2*e*Math.sin(deg2rad(M)) +
+        4*e*y*Math.sin(deg2rad(M))*Math.cos(2*deg2rad(L0)) -
+        0.5*y*y*Math.sin(4*deg2rad(L0)) -
+        1.25*e*e*Math.sin(2*deg2rad(M))
+    );
+
+    const mins = dt.getUTCHours()*60 + dt.getUTCMinutes() + dt.getUTCSeconds()/60;
+    const tst = (mins + eqTime + 4*lon) % 1440;
+    let ha = tst/4 - 180;
+    if (ha < -180) ha += 360;
+
+    const sunAz = (rad2deg(Math.atan2(
+        Math.sin(deg2rad(ha)),
+        Math.cos(deg2rad(ha))*Math.sin(deg2rad(lat)) -
+        Math.tan(deg2rad(decl))*Math.cos(deg2rad(lat))
+    )) + 180) % 360;
+
+    const bowAz = (sunAz - obsAngle + 360) % 360;
+
+    document.getElementById("output").innerHTML =
+        `<b>Sun Azimuth (TRUE):</b> ${sunAz.toFixed(5)}°<br>
+         <b>Observed Angle:</b> ${obsAngle.toFixed(5)}°<br>
+         <b>Final Bow / Vessel Azimuth:</b> <b>${bowAz.toFixed(5)}°</b>`;
+
+} catch (err) {
+    alert(err);
+}
+}
+</script>
+
+</body>
+</html>
